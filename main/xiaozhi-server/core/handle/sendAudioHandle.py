@@ -14,7 +14,10 @@ TAG = __name__
 # 音频帧时长（毫秒）
 AUDIO_FRAME_DURATION = 60
 # 预缓冲包数量，直接发送以减少延迟
-PRE_BUFFER_COUNT = 5
+# 注意：调大到 16 是为缓解句中卡顿。每句开头一次性 burst 16 包 ≈ 960ms 客户端缓冲，
+# 第 6 包起的 60ms 严格节奏没有自然 catch-up 能力，缓冲只够约 300ms 抖动，
+# 实测网络/设备 ≥300ms 的抖动会断流。rebase upstream 时若值被改回 5，请审慎确认。
+PRE_BUFFER_COUNT = 16
 
 
 async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text, sentence_id=None):

@@ -10,6 +10,7 @@ from core.http_server import SimpleHttpServer
 from core.websocket_server import WebSocketServer
 from core.utils.util import check_ffmpeg_installed
 from core.utils.gc_manager import get_gc_manager
+from extensions.llm_admin import install as install_llm_admin
 
 TAG = __name__
 logger = setup_logging()
@@ -74,6 +75,8 @@ async def main():
     # 启动 Simple http 服务器
     ota_server = SimpleHttpServer(config)
     ota_task = asyncio.create_task(ota_server.start())
+    # 启动可选扩展：LLM 调用日志面板（通过 config.extensions.llm_admin.enabled 开关）
+    install_llm_admin(config)
 
     read_config_from_api = config.get("read_config_from_api", False)
     port = int(config["server"].get("http_port", 8003))

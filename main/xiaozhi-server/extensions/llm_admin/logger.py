@@ -104,7 +104,7 @@ def log_call(
         """,
         (
             time.time(),
-            session_id,
+            session_id or None,
             call_type,
             model_name,
             base_url,

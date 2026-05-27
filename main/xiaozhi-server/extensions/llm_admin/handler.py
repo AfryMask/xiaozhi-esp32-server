@@ -22,11 +22,13 @@ from .logger import db_path
 
 _ADMIN_HTML = (Path(__file__).parent / "admin.html").read_text(encoding="utf-8")
 
-# NULL session_id rows can't be aggregated with anything else, so we synthesize
-# a per-row "solo:<id>" key. The detail route falls back to a by-id lookup when
-# it sees that prefix.
+# NULL / empty session_id rows can't be aggregated with anything else, so we
+# synthesize a per-row "solo:<id>" key. The detail route falls back to a by-id
+# lookup when it sees that prefix. NULLIF maps '' to NULL so the synthesis
+# fires for empty-string rows too (e.g. mem_local_short summary calls go
+# through base.py's response_no_stream → response("", ...)).
 _SOLO_KEY_PREFIX = "solo:"
-_SESS_KEY_SQL = f"COALESCE(session_id, '{_SOLO_KEY_PREFIX}' || id)"
+_SESS_KEY_SQL = f"COALESCE(NULLIF(session_id, ''), '{_SOLO_KEY_PREFIX}' || id)"
 
 
 def _open_db() -> sqlite3.Connection | None:

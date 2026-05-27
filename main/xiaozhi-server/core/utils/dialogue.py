@@ -27,6 +27,10 @@ class Dialogue:
         self.dialogue: List[Message] = []
         # 获取当前时间
         self.current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 最多保留近多少轮对话；一轮 = 一条 user 消息及其后续的 assistant/tool 响应。
+        # 切割点对齐到 user 消息边界，避免把 assistant.tool_calls 与对应的 tool 响应拆开（拆开会被
+        # OpenAI 等 API 直接 400）。<=0 视为不限。
+        self.max_rounds: int = 20
 
     def put(self, message: Message):
         self.dialogue.append(message)
@@ -60,6 +64,16 @@ class Dialogue:
             system_msg.content = new_content
         else:
             self.put(Message(role="system", content=new_content))
+
+    def _truncate_to_recent_rounds(
+        self, messages: List[Message], max_rounds: int
+    ) -> List[Message]:
+        if max_rounds <= 0:
+            return messages
+        user_indices = [i for i, m in enumerate(messages) if m.role == "user"]
+        if len(user_indices) <= max_rounds:
+            return messages
+        return messages[user_indices[-max_rounds]:]
 
     def _ensure_tool_calls_complete(self, messages: List[Message]) -> List[Message]:
         """
@@ -144,8 +158,9 @@ class Dialogue:
 
             dialogue.append({"role": "system", "content": dynamic_part})
 
-        # 第四段：实际对话历史（不含 few-shot）
+        # 第四段：实际对话历史（不含 few-shot），按近 N 轮 user 边界截断
         actual_messages = [m for m in non_system_messages if not m.is_temporary]
+        actual_messages = self._truncate_to_recent_rounds(actual_messages, self.max_rounds)
         complete_actual = self._ensure_tool_calls_complete(actual_messages)
         for m in complete_actual:
             self.getMessages(m, dialogue)

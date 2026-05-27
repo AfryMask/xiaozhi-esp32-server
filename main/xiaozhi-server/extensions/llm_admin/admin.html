@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LLM 调用日志</title>
+<style>
+:root {
+  --border: #e2e2e2;
+  --muted: #666;
+  --bg-alt: #fafafa;
+  --bg-hover: #f0f0f0;
+  --bg-active: #e8e8e8;
+  --accent: #111;
+  --warn: #b67200;
+  --danger: #b00020;
+  --pad-xs: 4px; --pad-sm: 8px; --pad-md: 12px; --pad-lg: 16px; --pad-xl: 24px;
+  --gap-xs: 2px; --gap-sm: 4px; --gap-md: 8px; --gap-lg: 12px;
+  --font-xs: 11px; --font-sm: 12px; --font-md: 13px; --font-lg: 14px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; color: #222; display: flex; flex-direction: column; }
+
+/* Header */
+.page-header {
+  display: flex; align-items: center; gap: var(--gap-lg);
+  padding: 0 var(--pad-xl); min-height: 45px;
+  border-bottom: 1px solid var(--border); background: var(--bg-alt);
+  flex: 0 0 auto;
+}
+.page-header .title { font-size: var(--font-md); font-weight: 600; color: var(--accent); }
+.stats { display: flex; gap: var(--gap-md); margin-left: auto; }
+.stat { border: 1px solid var(--border); border-radius: 4px; padding: 3px 12px; text-align: center; background: #fff; }
+.stat .val { font-size: var(--font-lg); font-weight: 700; color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.stat .lbl { font-size: var(--font-xs); color: var(--muted); }
+
+/* Filter bar */
+.toolbar {
+  padding: var(--pad-sm) var(--pad-xl); border-bottom: 1px solid var(--border);
+  background: #fff; display: flex; gap: var(--gap-md); flex-wrap: wrap;
+  align-items: center; flex: 0 0 auto; font-size: var(--font-sm);
+}
+.toolbar input, .toolbar select {
+  padding: 3px var(--pad-sm); font-size: var(--font-sm); border: 1px solid var(--border);
+  border-radius: 4px; background: #fff; color: #222; outline: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.toolbar input:focus, .toolbar select:focus { border-color: var(--accent); }
+.toolbar label { display: inline-flex; align-items: center; gap: var(--gap-sm); color: var(--muted); }
+.toolbar button {
+  padding: 3px var(--pad-md); font-size: var(--font-sm); background: #fff;
+  border: 1px solid var(--border); border-radius: 4px; cursor: pointer; color: #222;
+}
+.toolbar button:hover { border-color: var(--accent); }
+.toolbar button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.toolbar button.primary:hover { opacity: 0.85; }
+.toolbar .pageinfo { color: var(--muted); margin-left: auto; font-size: var(--font-xs); }
+
+/* Main split */
+.main { flex: 1; min-height: 0; display: grid; grid-template-columns: 360px 1fr; }
+
+/* Left list */
+.call-list {
+  display: flex; flex-direction: column; border-right: 1px solid var(--border);
+  min-height: 0; background: var(--bg-alt); overflow: hidden;
+}
+.call-list ul { list-style: none; flex: 1; overflow: auto; min-height: 0; }
+.call-list li {
+  padding: var(--pad-sm) var(--pad-md); border-bottom: 1px solid var(--border);
+  cursor: pointer; border-left: 3px solid transparent; background: #fff;
+}
+.call-list li:hover { background: var(--bg-hover); }
+.call-list li.selected { background: var(--bg-active); border-left-color: var(--accent); }
+.call-list li.has-error { border-left-color: var(--danger); }
+.call-list li.has-error.selected { border-left-color: var(--danger); background: #fdf0f1; }
+.call-list li .row1 {
+  display: flex; gap: var(--gap-md); align-items: baseline;
+  font-size: var(--font-xs); color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.call-list li .row1 .nums { margin-left: auto; }
+.call-list li .row2 {
+  margin-top: 3px; font-size: var(--font-sm); color: #222;
+  display: flex; align-items: baseline; gap: var(--gap-md);
+  overflow: hidden;
+}
+.call-list li .row2 > span:first-child {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.call-list li .row2.empty { color: var(--muted); font-style: italic; }
+
+/* Kind tags */
+.kind-tag {
+  display: inline-block; font-size: var(--font-xs); padding: 0 var(--pad-xs);
+  border-radius: 3px; background: var(--bg-active); color: var(--accent);
+  font-weight: 600; white-space: nowrap;
+}
+.kind-tag.llm { background: #e9f2ff; color: #2457a6; }
+.kind-tag.tts { background: #eef7e7; color: #567d2d; }
+.kind-tag.stt { background: #fff3d6; color: var(--warn); }
+
+/* Error / cost pills */
+.err-pill {
+  display: inline-block; font-size: var(--font-xs); padding: 0 var(--pad-xs);
+  border-radius: 3px; background: #fde7ea; color: var(--danger);
+}
+.cost-cell {
+  color: #137d3a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--font-xs); font-weight: 600; margin-left: auto;
+}
+
+/* Right detail */
+.call-detail { overflow: auto; min-height: 0; background: #fff; }
+.call-detail .placeholder {
+  padding: 60px var(--pad-xl); color: var(--muted); font-size: var(--font-md); text-align: center;
+}
+.call-detail .body { padding: var(--pad-md) var(--pad-lg); }
+
+/* Summary card */
+.turn-summary {
+  background: #fff; border: 1px solid var(--border); border-radius: 4px;
+  padding: var(--pad-sm) var(--pad-md); margin-bottom: var(--pad-md); font-size: var(--font-sm);
+}
+.turn-summary .row {
+  display: flex; gap: var(--gap-md); flex-wrap: wrap; color: var(--muted); align-items: baseline;
+}
+.turn-summary .row b { color: var(--accent); font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.turn-summary .row b.cost-cell { color: #137d3a; }
+.turn-summary .id-row { margin-top: var(--pad-xs); align-items: center; gap: var(--gap-md); }
+.turn-summary .session-id {
+  flex: 1; min-width: 0; padding: 2px var(--pad-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-xs);
+  color: #444; background: #f6f7f9; border: 1px solid var(--border); border-radius: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Chat messages */
+.msg { margin-bottom: var(--pad-xs); }
+.bubble {
+  padding: var(--pad-xs) var(--pad-sm); border-radius: 4px;
+  font-size: var(--font-md); line-height: 1.45; word-break: break-word;
+}
+.msg.role-user .bubble { background: #d6e7ff; color: #0a3a72; }
+.msg.role-assistant .bubble { background: #f3f3f5; color: #222; border: 1px solid var(--border); }
+.msg.role-system .bubble {
+  background: #ececef; color: #555; border: 1px dashed var(--border); font-size: var(--font-sm);
+}
+.msg.role-tool .bubble {
+  background: #fff7d6; color: #5a4a00; border: 1px solid #f0e5b0;
+  font-size: var(--font-sm); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.role-label {
+  font-size: var(--font-xs); text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted); margin-bottom: 2px;
+}
+.bubble pre.full {
+  margin: 0; font-size: var(--font-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; word-break: break-word;
+}
+.tool-calls {
+  margin-top: var(--pad-xs); padding-top: var(--pad-xs);
+  border-top: 1px dashed var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-xs); color: #555;
+}
+.tool-calls .tc-line { margin-top: 3px; }
+.tool-calls .tc-name { color: #0a6e2c; font-weight: 600; }
+.tool-calls .tc-args { display: block; margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
+
+/* Error block */
+.error-block {
+  margin-top: var(--pad-sm); background: #fde7ea; color: var(--danger);
+  padding: var(--pad-sm); border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--font-sm); white-space: pre-wrap; word-break: break-word;
+}
+
+/* Tools block and Usage block */
+.tools-block, .usage-block {
+  margin-bottom: var(--pad-md); border: 1px dashed var(--border);
+  border-radius: 3px; background: #fafafb;
+}
+.tools-block > summary, .usage-block > summary {
+  padding: var(--pad-xs) var(--pad-sm); font-size: var(--font-xs); color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; user-select: none;
+}
+.tools-block > summary:hover, .usage-block > summary:hover { color: var(--accent); }
+.tools-block .tools-list { padding: var(--pad-xs) var(--pad-sm) var(--pad-sm); display: flex; flex-direction: column; gap: var(--gap-md); }
+.tools-block .tool-item { border-top: 1px solid var(--border); padding-top: var(--pad-sm); }
+.tools-block .tool-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-sm); font-weight: 600; color: #0a6e2c; margin-bottom: 3px; }
+.tools-block .tool-desc, .tools-block .tool-params {
+  margin: 2px 0 0; font-size: var(--font-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; word-break: break-word; color: #333;
+}
+.tools-block .tool-params { color: #555; }
+.usage-block pre {
+  margin: var(--pad-xs) var(--pad-sm) var(--pad-sm); font-size: var(--font-xs);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; word-break: break-word; color: #333;
+}
+
+/* Call cards (one per LLM call within a session) */
+.call-card {
+  border: 1px solid var(--border); border-radius: 4px;
+  margin-bottom: var(--pad-md); background: #fff; overflow: hidden;
+}
+.call-card.has-error { border-color: var(--danger); }
+.call-card-header {
+  display: flex; gap: var(--gap-md); align-items: baseline; flex-wrap: wrap;
+  padding: var(--pad-xs) var(--pad-sm);
+  background: var(--bg-alt); border-bottom: 1px solid var(--border);
+  font-size: var(--font-xs); color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.call-card-header .num { font-weight: 700; color: var(--accent); }
+.call-card-header .meta-item { color: var(--muted); }
+.call-card-body { padding: var(--pad-sm); }
+/* Folded history block within a call card */
+.history-fold {
+  margin-bottom: var(--pad-xs); border: 1px dashed var(--border);
+  border-radius: 3px; background: #fafafb;
+}
+.history-fold > summary {
+  padding: var(--pad-xs) var(--pad-sm); font-size: var(--font-xs); color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer; user-select: none;
+}
+.history-fold > summary:hover { color: var(--accent); }
+.history-fold-body { padding: var(--pad-xs) var(--pad-sm); display: flex; flex-direction: column; gap: var(--gap-xs); }
+
+/* Misc */
+.empty-msg { padding: var(--pad-lg) var(--pad-xl); color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="page-header">
+  <span class="title">LLM 调用日志</span>
+  <div class="stats">
+    <div class="stat"><div class="val" id="s-total">—</div><div class="lbl">总调用</div></div>
+    <div class="stat"><div class="val" id="s-today">—</div><div class="lbl">今日调用</div></div>
+    <div class="stat"><div class="val" id="s-cost">—</div><div class="lbl">总费用</div></div>
+    <div class="stat"><div class="val" id="s-today-cost">—</div><div class="lbl">今日费用</div></div>
+  </div>
+</div>
+<div class="toolbar">
+  <label>Session <input id="f-session" placeholder="ID…" style="width:160px"></label>
+  <label>模型 <input id="f-model" placeholder="名称…" style="width:120px"></label>
+  <label>类型 <select id="f-type">
+    <option value="">全部</option>
+    <option value="llm">llm</option>
+    <option value="tts">tts</option>
+    <option value="stt">stt</option>
+  </select></label>
+  <label>从 <input id="f-from" type="date"></label>
+  <label>到 <input id="f-to" type="date"></label>
+  <label><input id="f-err" type="checkbox"> 仅错误</label>
+  <button class="primary" onclick="doLoad()">查询</button>
+  <button onclick="doReset()">重置</button>
+  <span class="pageinfo" id="count-lbl"></span>
+</div>
+<div class="main">
+  <div class="call-list">
+    <ul id="list-ul"><li class="empty-msg" id="list-msg">加载中…</li></ul>
+  </div>
+  <div class="call-detail" id="call-detail">
+    <div class="placeholder">← 点击左侧选择一个 session</div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let currentKey = null;
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+// 浏览器时区可能是错的，所有时间统一按 Asia/Shanghai (UTC+8) 显示。
+const TZ = 'Asia/Shanghai';
+const _fmtFull = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: TZ, hour12: false,
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+});
+const _fmtShort = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: TZ, hour12: false,
+  month: 'numeric', day: 'numeric',
+  hour: '2-digit', minute: '2-digit',
+});
+function fmtTime(ts) {
+  return _fmtFull.format(new Date(ts * 1000));
+}
+function fmtTimeShort(ts) {
+  return _fmtShort.format(new Date(ts * 1000));
+}
+function fmtDur(ms) {
+  if (ms == null) return '—';
+  return ms < 1000 ? Math.round(ms) + 'ms' : (ms/1000).toFixed(2) + 's';
+}
+function fmtCost(c) {
+  if (c == null) return null;
+  return '$' + Number(c).toFixed(6);
+}
+function prettyJson(s) {
+  if (!s) return '';
+  if (typeof s !== 'string') return JSON.stringify(s, null, 2);
+  try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
+}
+function lastUserMsg(input_messages) {
+  try {
+    const msgs = typeof input_messages === 'string' ? JSON.parse(input_messages) : input_messages;
+    if (!Array.isArray(msgs)) return null;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role === 'user') {
+        if (typeof m.content === 'string') return m.content;
+        if (Array.isArray(m.content)) {
+          const p = m.content.find(p => p.type === 'text');
+          if (p) return p.text;
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
+// response_with_functions 是绝大多数 LLM call 的默认类型，到处贴这个 tag 噪音太大，
+// 干脆隐藏；其他类型（llm/tts/stt 或新类型）正常显示。
+function kindTag(t) {
+  if (t === 'response_with_functions') return '';
+  const cls = (t === 'llm' || t === 'tts' || t === 'stt') ? ` ${t}` : '';
+  return `<span class="kind-tag${cls}">${esc(t || '?')}</span>`;
+}
+
+async function loadStats() {
+  try {
+    const d = await fetch('/admin/api/stats').then(r => r.json());
+    $('s-total').textContent = d.total_calls ?? '—';
+    $('s-today').textContent = d.today_calls ?? '—';
+    $('s-cost').textContent = d.total_cost != null ? fmtCost(d.total_cost) : '—';
+    $('s-today-cost').textContent = d.today_cost != null ? fmtCost(d.today_cost) : '—';
+  } catch {}
+}
+
+function buildParams() {
+  const p = new URLSearchParams();
+  const v = id => $(id).value.trim();
+  if (v('f-session')) p.set('session_id', v('f-session'));
+  if (v('f-model'))   p.set('model', v('f-model'));
+  if ($('f-type').value) p.set('call_type', $('f-type').value);
+  if (v('f-from'))    p.set('date_from', v('f-from'));
+  if (v('f-to'))      p.set('date_to', v('f-to'));
+  if ($('f-err').checked) p.set('errors_only', '1');
+  p.set('limit', 200);
+  return p;
+}
+
+async function doLoad() {
+  const ul = $('list-ul');
+  ul.innerHTML = '<li class="empty-msg">加载中…</li>';
+  clearDetail();
+  currentKey = null;
+  try {
+    const rows = await fetch('/admin/api/llm-calls?' + buildParams()).then(r => r.json());
+    $('count-lbl').textContent = `共 ${rows.length} 个 session`;
+    if (!rows.length) { ul.innerHTML = '<li class="empty-msg">无数据</li>'; return; }
+    ul.innerHTML = rows.map(row => {
+      const msg = lastUserMsg(row.last_input);
+      const errPill = row.has_error ? ' <span class="err-pill">err</span>' : '';
+      const costText = fmtCost(row.cost);
+      const costHtml = costText ? `<span class="cost-cell">${esc(costText)}</span>` : '';
+      const typeTags = (row.call_types || '').split(',').filter(Boolean).map(kindTag).join(' ');
+      const tokens = `${row.prompt_tokens ?? '—'}/${row.completion_tokens ?? '—'}`;
+      return `<li class="${row.has_error ? 'has-error' : ''}" data-key="${esc(row.sess_key)}">
+        <div class="row1">
+          <span>${typeTags}${errPill}</span>
+          <span class="nums">${row.calls}c · ${esc(tokens)}</span>
+        </div>
+        <div class="row2${msg ? '' : ' empty'}">
+          <span>${esc(msg || '（无用户消息）')}</span>
+        </div>
+        <div class="row1" style="margin-top:2px">
+          <span>${esc(fmtTimeShort(row.last_ts))}</span>
+          ${costHtml}
+        </div>
+      </li>`;
+    }).join('');
+    // 用 addEventListener 而不是 inline onclick：sess_key 进入 JS 字符串时不需要再做转义
+    ul.querySelectorAll('li[data-key]').forEach(li => {
+      li.addEventListener('click', () => showSession(li.dataset.key));
+    });
+    showSession(rows[0].sess_key);
+  } catch (e) {
+    ul.innerHTML = `<li class="empty-msg" style="color:var(--danger)">加载失败: ${esc(e.message)}</li>`;
+  }
+}
+
+function clearDetail() {
+  $('call-detail').innerHTML = '<div class="placeholder">← 点击左侧选择一个 session</div>';
+}
+
+async function showSession(key) {
+  document.querySelectorAll('.call-list li').forEach(li => {
+    li.classList.toggle('selected', li.dataset.key === key);
+  });
+  currentKey = key;
+  const detail = $('call-detail');
+  detail.innerHTML = '<div class="placeholder">加载中…</div>';
+  try {
+    const data = await fetch('/admin/api/llm-calls/session/' + encodeURIComponent(key))
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
+    renderSession(data);
+  } catch (e) {
+    detail.innerHTML = `<div class="placeholder" style="color:var(--danger)">加载失败: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderSession(data) {
+  const costText = fmtCost(data.cost_total);
+  const summary = `<div class="turn-summary">
+    <div class="row">
+      <b>${data.calls_total} call${data.calls_total === 1 ? '' : 's'}</b>
+      <span>${esc(fmtTime(data.first_ts))} → ${esc(fmtTime(data.last_ts))}</span>
+      <span>tokens <b>${data.prompt_tokens_total ?? '—'}/${data.completion_tokens_total ?? '—'}</b></span>
+      ${costText ? `<span>cost <b class="cost-cell">${esc(costText)}</b></span>` : ''}
+      <span>耗时 <b>${esc(fmtDur(data.duration_ms_total))}</b></span>
+      ${data.has_error ? '<span class="err-pill">error</span>' : ''}
+    </div>
+    <div class="row id-row" style="margin-top:4px">
+      <span style="color:var(--muted);font-size:var(--font-xs)">session</span>
+      <span class="session-id">${esc(data.session_id || '—')}</span>
+    </div>
+  </div>`;
+  const cards = data.calls.map((call, i) => {
+    const prev = i > 0 ? data.calls[i - 1] : null;
+    return renderCallCard(call, prev, i + 1, i === 0);
+  }).join('');
+  $('call-detail').innerHTML = `<div class="body">${summary}${cards}</div>`;
+}
+
+function parseMsgs(s) {
+  if (!s) return [];
+  if (Array.isArray(s)) return s;
+  try { const j = JSON.parse(s); return Array.isArray(j) ? j : []; } catch { return []; }
+}
+
+
+// 解析 call 的输出字段：output_content（文本）+ tool_calls（JSON 字符串），返回 { text, tcs }。
+// 不做任何特殊解包——direct_answer 等虚拟工具跟普通 tool call 一样按原始结构展示。
+function parseOutput(outputContent, toolCallsRaw) {
+  let tcs = null;
+  if (toolCallsRaw) {
+    try { tcs = typeof toolCallsRaw === 'string' ? JSON.parse(toolCallsRaw) : toolCallsRaw; } catch {}
+  }
+  return {
+    text: outputContent || '',
+    tcs: Array.isArray(tcs) && tcs.length ? tcs : null,
+  };
+}
+
+
+function renderCallCard(call, prev, idx, isFirst) {
+  const curRaw = parseMsgs(call.input_messages);
+  // 卡片 = cur.input 全部 + 本轮 output（合成一条 assistant：content + tool_calls 原样）。
+  const { text: outText, tcs: outTcs } = parseOutput(call.output_content, call.tool_calls);
+  const outputMsg = (outText || outTcs)
+    ? Object.assign({ role: 'assistant' }, outText ? { content: outText } : {}, outTcs ? { tool_calls: outTcs } : {})
+    : null;
+  const combined = outputMsg ? [...curRaw, outputMsg] : curRaw;
+  // 折叠规则：从第一条到"倒数第二个 assistant"（含）折起来，之后默认展开。
+  // #1 特例：全部展开（用户约定，避免欢迎语 + 本轮 output 触发误折叠）。
+  let collapsed = [], visible = combined;
+  if (!isFirst) {
+    const asstAt = [];
+    for (let i = 0; i < combined.length; i++) {
+      if (combined[i] && combined[i].role === 'assistant') asstAt.push(i);
+    }
+    if (asstAt.length >= 2) {
+      const cut = asstAt[asstAt.length - 2];
+      collapsed = combined.slice(0, cut + 1);
+      visible   = combined.slice(cut + 1);
+    }
+  }
+
+  const errClass = call.error ? ' has-error' : '';
+  const costText = fmtCost(call.cost);
+  const header = `<div class="call-card-header">
+    <span class="num">#${idx}</span>
+    ${kindTag(call.call_type)}
+    <span class="meta-item">${esc(call.model_name || '—')}</span>
+    <span class="meta-item">${esc(fmtTimeShort(call.ts))}</span>
+    <span class="meta-item">${esc(fmtDur(call.duration_ms))}</span>
+    <span class="meta-item">tokens ${call.prompt_tokens ?? '—'}/${call.completion_tokens ?? '—'}</span>
+    ${costText ? `<span class="meta-item cost-cell">${esc(costText)}</span>` : ''}
+    ${call.error ? '<span class="err-pill">err</span>' : ''}
+  </div>`;
+  const collapsedHtml = collapsed.length
+    ? `<details class="history-fold"><summary>展开前 ${collapsed.length} 条历史</summary>
+        <div class="history-fold-body">${collapsed.map(m => renderMsg(m)).join('')}</div>
+       </details>`
+    : '';
+  const visibleHtml = visible.map(m => renderMsg(m)).join('');
+  const toolsBlock = isFirst ? renderToolsBlock(call.tools) : '';
+  const errBlock = call.error ? `<div class="error-block">${esc(call.error)}</div>` : '';
+  return `<div class="call-card${errClass}">
+    ${header}
+    <div class="call-card-body">
+      ${toolsBlock}
+      ${collapsedHtml}
+      ${visibleHtml}
+      ${errBlock}
+    </div>
+  </div>`;
+}
+
+function renderMsg(m) {
+  const role = m.role || 'unknown';
+  const content = m.content;
+  if (role === 'system') {
+    const text = typeof content === 'string' ? content : JSON.stringify(content ?? '');
+    return `<div class="msg role-system"><div class="bubble">
+      <div class="role-label">system · ${text.length} chars</div>
+      <pre class="full">${esc(text)}</pre>
+    </div></div>`;
+  }
+  if (role === 'tool') {
+    const text = typeof content === 'string' ? content : JSON.stringify(content ?? '');
+    const label = m.tool_call_id ? `tool result (${esc(m.tool_call_id)})` : 'tool result';
+    return `<div class="msg role-tool"><div class="bubble">
+      <div class="role-label">${label} · ${text.length} chars</div>
+      <pre class="full">${esc(prettyJson(text))}</pre>
+    </div></div>`;
+  }
+  if (role === 'assistant') {
+    const rawText = typeof content === 'string' ? content : '';
+    const rawTcs  = Array.isArray(m.tool_calls) ? m.tool_calls : null;
+    const { text, tcs } = parseOutput(rawText, rawTcs);
+    let tcHtml = '';
+    if (tcs) {
+      tcHtml = '<div class="tool-calls">' + tcs.map(tc => {
+        const fn = tc.function || {};
+        return `<div class="tc-line">→ <span class="tc-name">${esc(fn.name || '?')}</span>
+          <pre class="tc-args">${esc(prettyJson(fn.arguments || ''))}</pre></div>`;
+      }).join('') + '</div>';
+    }
+    const textHtml = text ? `<pre class="full">${esc(text)}</pre>` : (tcs ? '' : '<div class="role-label">(empty)</div>');
+    return `<div class="msg role-assistant"><div class="bubble">
+      <div class="role-label">assistant</div>
+      ${textHtml}${tcHtml}
+    </div></div>`;
+  }
+  // user
+  if (Array.isArray(content)) {
+    const parts = content.map(b => {
+      if (b && b.type === 'text') return `<pre class="full">${esc(b.text || '')}</pre>`;
+      return `<pre class="full">${esc(JSON.stringify(b))}</pre>`;
+    }).join('');
+    const charCount = content.reduce((n, b) => n + (b && b.type === 'text' ? (b.text || '').length : 0), 0);
+    return `<div class="msg role-user"><div class="bubble">
+      <div class="role-label">user · ${charCount} chars</div>${parts}
+    </div></div>`;
+  }
+  const text = typeof content === 'string' ? content : JSON.stringify(content ?? '');
+  return `<div class="msg role-user"><div class="bubble">
+    <div class="role-label">user · ${text.length} chars</div>
+    <pre class="full">${esc(prettyJson(text))}</pre>
+  </div></div>`;
+}
+
+function renderToolsBlock(tools_json) {
+  if (!tools_json) return '';
+  let tools;
+  try { tools = JSON.parse(tools_json); } catch { return ''; }
+  if (!Array.isArray(tools) || !tools.length) return '';
+  const names = tools.map(t => (t && t.function && t.function.name) || (t && t.name) || '?');
+  const items = tools.map(t => {
+    const fn = (t && t.function) || t || {};
+    const name = fn.name || '?';
+    const desc = typeof fn.description === 'string' ? fn.description : '';
+    const params = fn.parameters ? JSON.stringify(fn.parameters, null, 2) : '';
+    return `<div class="tool-item">
+      <div class="tool-name">${esc(name)}</div>
+      ${desc ? `<pre class="tool-desc">${esc(desc)}</pre>` : ''}
+      ${params ? `<pre class="tool-params">${esc(params)}</pre>` : ''}
+    </div>`;
+  }).join('');
+  return `<details class="tools-block">
+    <summary>tools (${tools.length}): ${esc(names.join(', '))}</summary>
+    <div class="tools-list">${items}</div>
+  </details>`;
+}
+
+function doReset() {
+  ['f-session','f-model','f-from','f-to'].forEach(id => $(id).value = '');
+  $('f-type').value = '';
+  $('f-err').checked = false;
+  doLoad();
+}
+
+loadStats();
+doLoad();
+document.querySelectorAll('.toolbar input[type=text], .toolbar input[type=date], .toolbar input:not([type])').forEach(el => {
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') doLoad(); });
+});
+</script>
+</body>
+</html>

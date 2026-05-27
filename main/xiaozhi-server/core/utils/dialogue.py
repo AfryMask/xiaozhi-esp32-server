@@ -142,26 +142,6 @@ class Dialogue:
                     flags=re.DOTALL,
                 )
 
-            # 追加说话人信息
-            try:
-                speakers = voiceprint_config.get("speakers", [])
-                if speakers:
-                    dynamic_part += "\n<speakers_info>"
-                    for speaker_str in speakers:
-                        try:
-                            parts = speaker_str.split(",", 2)
-                            if len(parts) >= 2:
-                                name = parts[1].strip()
-                                description = (
-                                    parts[2].strip() if len(parts) >= 3 else ""
-                                )
-                                dynamic_part += f"\n- {name}：{description}"
-                        except:
-                            pass
-                    dynamic_part += "\n</speakers_info>"
-            except:
-                pass
-
             dialogue.append({"role": "system", "content": dynamic_part})
 
         # 第四段：实际对话历史（不含 few-shot）

@@ -64,7 +64,7 @@ selected_module:
 TTS:
   FishSpeech:
     reference_audio: ["config/assets/wakeup_words.wav",]
-    reference_text: ["哈啰啊，我是小智啦，声音好听的台湾女孩一枚，超开心认识你耶，最近在忙啥，别忘了给我来点有趣的料哦，我超爱听八卦的啦",]
+    reference_text: ["哈啰啊，我是小智啦，声音好听的女孩一枚，超开心认识你耶，最近在忙啥，别忘了给我来点有趣的料哦，我超爱听八卦的啦",]
     api_key: "123"
     api_url: "http://127.0.0.1:6006/v1/tts"
 ```
